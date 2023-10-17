@@ -4,15 +4,27 @@
 #include "freertos/task.h"
 #include "webserver.h"
 #include "wifiap.h"
+
+#include "esp_netif.h"
 #include "esp_wifi.h"
+#include "nvs_flash.h"
+
+#include "app.h"
+#include "debug.h"
 
 void taskSpi( void *arg );
 void taskWebserver( void *arg );
 
 void app_main(void)
 {
-	xTaskCreate(taskSpi, "SPI", 2000, NULL, 2, NULL);
-	xTaskCreate(taskWebserver, "web server", 4000, NULL, 1, NULL);
+  ESP_ERROR_CHECK(nvs_flash_init());
+  ESP_ERROR_CHECK(esp_netif_init());
+  ESP_ERROR_CHECK(esp_event_loop_create_default());
+
+  xTaskCreate(taskSpi, "SPI", 2000, NULL, 2, NULL);
+  xTaskCreate(taskWebserver, "web server", 6000, NULL, 1, NULL);
+  xTaskCreate(taskDebug, "debug task", 4000, NULL, 3, NULL);
+  xTaskCreate(taskApp, "app", 6000, NULL, 3, NULL);
 
 
 
@@ -20,7 +32,7 @@ void app_main(void)
     while (1) {
         printf("[%d] Hello world!\n", i);
         i++;
-        vTaskDelay(5000 / portTICK_PERIOD_MS);
+        vTaskDelay(10000 / portTICK_PERIOD_MS);
     }
 }
 
@@ -30,57 +42,30 @@ void taskSpi( void *arg )
 	while(1)
 	{
 	printf("SPI\n");
-	vTaskDelay(1000/ portTICK_PERIOD_MS);
+	vTaskDelay(10000/ portTICK_PERIOD_MS);
 	}
 }
 
 void taskWebserver( void *arg )
 {
+	/**
+	 * start AP
+	 */
 	wifiap_init(); // init wifi and event handler
 
-//	wifi_country_t country = {
-//	    .cc = "01",
-//	    .schan = 1,
-//	    .nchan = 11,
-//	    .policy = WIFI_COUNTRY_POLICY_AUTO,
-//	};
-//
-//	ESP_ERROR_CHECK(esp_wifi_set_country(&country));
 
-	wifi_scan_config_t params;
-	memset(&params, 0, sizeof(wifi_scan_config_t));
-
-//	wifi_scan_config_t scanConfig;
-//	scanConfig.ssid = NULL;
-//	scanConfig.bssid = NULL;
-//	scanConfig.channel = 0;
-//	scanConfig.show_hidden = false;
-//	scanConfig.scan_type = WIFI_SCAN_TYPE_ACTIVE;
-//	scanConfig.scan_time.active.min = 0;
-//	scanConfig.scan_time.active.max = 520;
-//	scanConfig.scan_time.passive = 120;
-
-
-//	webserver_init();
+	// webserver_init();
 	while (1)
 	{
-		esp_wifi_scan_start(&params, true);
-		uint16_t apCount = 0;
-		ESP_ERROR_CHECK(esp_wifi_scan_get_ap_num(&apCount));
-		printf("%d wifi access points found\n\r", apCount);
-
-		wifi_ap_record_t record[20];
-		uint16_t maxAps = 20;
-		ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&maxAps, &record));
-
-		uint8_t n;
-		for (n = 0; n < maxAps; n++)
-		{
-			printf("SSID:%s, RSSI: %d\n\r", record[n].ssid, record[n].rssi);
-		}
-
 
 		printf("WEB\n");
-		vTaskDelay(1000/ portTICK_PERIOD_MS);
+
+        wifi_ap_record_t record[20];
+        uint16_t count;
+        count = wifiap_scan(record, 20);
+        printf("AP count = %d\n\r", count);
+		vTaskDelay(100000/ portTICK_PERIOD_MS);
 	}
 }
+
+

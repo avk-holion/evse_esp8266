@@ -58,10 +58,21 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
 void wifi_init_softap()
 {
     tcpip_adapter_init();
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+    tcpip_adapter_dhcps_stop(TCPIP_ADAPTER_IF_AP);
+
+    tcpip_adapter_ip_info_t ipInfo;
+    IP4_ADDR(&ipInfo.ip, 192,168,0,1);
+    //ipInfo.ip = 0xC0A80001; // 192.168.0.1
+    IP4_ADDR(&ipInfo.gw, 192,168,0,1);
+    //ipInfo.gw = 0xC0A80001; // 192.168.0.1
+    IP4_ADDR(&ipInfo.netmask, 255,255,255,0);
+    // ipInfo.netmask = 0xFFFFFF00; // 255.255.255.0
+    ESP_ERROR_CHECK(tcpip_adapter_set_ip_info(TCPIP_ADAPTER_IF_AP, &ipInfo));
+    tcpip_adapter_dhcps_start(TCPIP_ADAPTER_IF_AP);
+
+
 
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL));
 
@@ -77,8 +88,10 @@ void wifi_init_softap()
     if (strlen(EXAMPLE_ESP_WIFI_PASS) == 0) {
         wifi_config.ap.authmode = WIFI_AUTH_OPEN;
     }
+
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
     ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config));
+
     ESP_ERROR_CHECK(esp_wifi_start());
 
     ESP_LOGI(TAG, "wifi_init_softap finished. SSID:%s password:%s",
@@ -91,4 +104,41 @@ void wifiap_init()
 
     ESP_LOGI(TAG, "ESP_WIFI_MODE_AP");
     wifi_init_softap();
+}
+
+/*------------------------------------------------------------------------------
+* Search for WIFI acces points, ands store them into an array.
+*
+* @param[out] list list of found access points.
+* @param[in] length max entries in the list.
+*
+* @retval apCount number of access point found, and stored in the list.
+* ----------------------------------------------------------------------------*/
+uint16_t wifiap_scan(wifi_ap_record_t* list, uint16_t length)
+{
+  uint16_t apCount;
+
+  wifi_scan_config_t params;
+  memset(&params, 0, sizeof(wifi_scan_config_t));
+
+  esp_wifi_scan_start(&params, true);
+
+  ESP_ERROR_CHECK(esp_wifi_scan_get_ap_num(&apCount));
+  printf("%d wifi access points found\n\r", apCount);
+  printf("SSID\t, RSSI\n\r");
+
+  if (apCount > length)
+  {
+    apCount = length;
+  }
+
+  ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&apCount, list));
+
+  uint8_t n;
+  for (n = 0; n < apCount; n++)
+  {
+    printf("%s\t, %d\n\r", list[n].ssid, list[n].rssi);
+  }
+
+  return apCount;
 }
