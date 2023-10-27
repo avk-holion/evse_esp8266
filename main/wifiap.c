@@ -18,9 +18,11 @@
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/event_groups.h"
 #include "esp_system.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
+#include "esp_netif.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
 
@@ -37,21 +39,68 @@
 #define EXAMPLE_MAX_STA_CONN       1 // CONFIG_ESP_MAX_STA_CONN
 
 static const char *TAG = "wifi softAP";
+static EventGroupHandle_t wifi_event_group = NULL;
+const int WIFI_CONNECTED_BIT = BIT0;
+const int WIFI_AP_STOPPED_BIT = BIT1;
+
+
 
 static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                                     int32_t event_id, void* event_data)
 {
-    if (event_id == WIFI_EVENT_AP_STACONNECTED) {
+  wifi_mode_t mode;
+  ESP_ERROR_CHECK (esp_wifi_get_mode(&mode));
+  ESP_LOGI(TAG, "WIFI Event id: %d, mode: %d", event_id, mode);
+
+    if (event_id == WIFI_EVENT_AP_STACONNECTED)
+    {
         wifi_event_ap_staconnected_t* event = (wifi_event_ap_staconnected_t*) event_data;
         ESP_LOGI(TAG, "station "MACSTR" join, AID=%d",
                  MAC2STR(event->mac), event->aid);
-    } else if (event_id == WIFI_EVENT_AP_STADISCONNECTED) {
+    }
+    else if (event_id == WIFI_EVENT_AP_STADISCONNECTED)
+    {
         wifi_event_ap_stadisconnected_t* event = (wifi_event_ap_stadisconnected_t*) event_data;
         ESP_LOGI(TAG, "station "MACSTR" leave, AID=%d",
                  MAC2STR(event->mac), event->aid);
-    } else if (event_id == WIFI_EVENT_SCAN_DONE) {
+    }
+    else if (event_id == WIFI_EVENT_AP_START)
+    {
+      xEventGroupClearBits(wifi_event_group, WIFI_AP_STOPPED_BIT);
+    }
+    else if (event_id == WIFI_EVENT_AP_STOP)
+    {
+      xEventGroupSetBits(wifi_event_group, WIFI_AP_STOPPED_BIT);
+    }
+    else if (event_id == WIFI_EVENT_SCAN_DONE)
+    {
     	wifi_event_sta_scan_done_t* event = (wifi_event_sta_scan_done_t*) event_data;
         ESP_LOGI(TAG, "status %d, number of AP: %d", event->status, event->number);
+    }
+    else if (event_id == WIFI_EVENT_STA_START)
+    {
+      if (mode == WIFI_MODE_STA)
+      {
+        ESP_LOGI(TAG, "Connected to AP, no IP yet");
+        ESP_ERROR_CHECK(esp_wifi_connect());
+      }
+    }
+    else if (event_id == WIFI_EVENT_STA_CONNECTED)
+    {
+      ESP_LOGI(TAG, "Got IP.");
+      if (mode == WIFI_MODE_STA)
+      {
+        xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
+      }
+    }
+    else if (event_id == WIFI_EVENT_STA_DISCONNECTED)
+    {
+      if (mode == WIFI_MODE_STA)
+      {
+        ESP_LOGI(TAG, "Discxonnected from AP, event set.");
+        ESP_ERROR_CHECK(esp_wifi_connect());
+        xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT);
+      }
     }
 }
 
@@ -94,8 +143,7 @@ void wifi_init_softap()
 
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    ESP_LOGI(TAG, "wifi_init_softap finished. SSID:%s password:%s",
-             EXAMPLE_ESP_WIFI_SSID, EXAMPLE_ESP_WIFI_PASS);
+    ESP_LOGI(TAG, "wifi_init_softap finished. SSID:%s password:%s", EXAMPLE_ESP_WIFI_SSID, EXAMPLE_ESP_WIFI_PASS);
 }
 
 void wifiap_init()
@@ -103,8 +151,85 @@ void wifiap_init()
     ESP_ERROR_CHECK(nvs_flash_init());
 
     ESP_LOGI(TAG, "ESP_WIFI_MODE_AP");
+
+    if (wifi_event_group == NULL)
+    {
+      wifi_event_group = xEventGroupCreate();
+    }
+
     wifi_init_softap();
 }
+
+/*------------------------------------------------------------------------------
+*
+* check for the current mode of the wifi
+*
+* @retval true if AP mode
+* ----------------------------------------------------------------------------*/
+bool wifiap_isApMode(void)
+{
+  bool apMode = false;
+
+  wifi_mode_t mode;
+  if (esp_wifi_get_mode(&mode) == ESP_OK)
+  {
+    if ((mode == WIFI_MODE_AP) ||
+        (mode == WIFI_MODE_APSTA))
+    {
+      apMode = true;
+      ESP_LOGI(TAG, "AP MODE !");
+    }
+  }
+
+
+  return apMode;
+}
+
+/*------------------------------------------------------------------------------
+*
+* @param[in,out] ssid ssid to connect too
+* @param[in,out] password password to use
+* @param[in,out] param3 param3_desc
+* @param[in,out] param4 param4_desc
+*
+* @retval espError return 0 on success, otherwise some ESP_ERROR
+* ----------------------------------------------------------------------------*/
+esp_err_t wifiap_connectToAp(char* ssid, char* password)
+{
+  esp_err_t espErr = ESP_FAIL;
+
+  if (wifiap_isApMode() == true)
+  {
+    ESP_LOGI(TAG, "Stopping wifi:");
+    ESP_ERROR_CHECK(esp_wifi_stop());
+    xEventGroupWaitBits(wifi_event_group, WIFI_AP_STOPPED_BIT, false, true, portMAX_DELAY);
+
+    wifi_config_t wifi_config = {0};
+
+    char* configSsid = (char*)wifi_config.sta.ssid;
+    strcpy(configSsid, ssid);
+    strcpy((char*)wifi_config.sta.password, password);
+    wifi_config.sta.bssid_set = 0;
+
+    ESP_LOGI(TAG, "Starting connect to AP: %s, %s", wifi_config.sta.ssid, wifi_config.sta.password);
+
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config));
+    ESP_ERROR_CHECK(esp_wifi_start());
+
+    // Wait for connection
+    xEventGroupWaitBits(wifi_event_group, WIFI_CONNECTED_BIT, false, true, portMAX_DELAY);
+    espErr = ESP_OK;
+
+    ESP_LOGI(TAG, "Connected to AP");
+
+  }
+
+
+
+  return espErr;
+}
+
 
 /*------------------------------------------------------------------------------
 * Search for WIFI acces points, ands store them into an array.

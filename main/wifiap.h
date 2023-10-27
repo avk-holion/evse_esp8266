@@ -34,6 +34,8 @@ namespace APP
 #endif
 
 
+esp_err_t wifiap_connectToAp(char* ssid, char* password);
+bool wifiap_isApMode(void);
 void wifiap_init();
 
 uint16_t wifiap_scan(wifi_ap_record_t* list, uint16_t length);

@@ -11,6 +11,7 @@
 ------------------------------------------------------------------------------*/
 #include <stdint.h>
 #include <stdio.h>
+#include <string>
 
 #include "app.h"
 #include "webserver.h"
@@ -33,10 +34,21 @@ namespace  // anonymous
                         Type declarations
 ------------------------------------------------------------------------------*/
 
+
+
 /*------------------------------------------------------------------------------
                         Variable declarations
 ------------------------------------------------------------------------------*/
-char debugSerialNumber[9] = {0};
+char debugFirmwareVersion[] = "0.0.0.1";
+int debugSerialNumber = 0;
+char debugIqUrl[35] = "";
+int debugCurrentAllowed = 16;
+int debugPhaseAvailable = 3;
+char debugPhaseOrder[] = "L1-L2-L3";
+char debugOcppUrl[150] = "";
+char debugSsid[33] = "";
+char debugWifiPaasword[64];
+
 /*------------------------------------------------------------------------------
                         Local functions and classes
 ------------------------------------------------------------------------------*/
@@ -47,10 +59,9 @@ esp_err_t httpReqSerailNumberGet(httpd_req_t *req)
   /**
    * get current serial Number
    */
-  uint32_t serialNumber = 0;
   // TODO get stored number
   cJSON* state = NULL;
-  if (serialNumber == 0)
+  if (debugSerialNumber == 0)
   {
     state = cJSON_CreateString("serial-required");
   }
@@ -73,16 +84,17 @@ esp_err_t httpReqSerailNumberGet(httpd_req_t *req)
   return ESP_OK;
 }
 
-esp_err_t httpReqSerailNumberPut(httpd_req_t *req)
+esp_err_t httpReqSerailNumberPut (httpd_req_t *req)
 {
 
   char buf;
   int ret;
+  esp_err_t status = ESP_OK;
 
   char rxBuffer[200];
   uint16_t len = sizeof(rxBuffer);
 
-  if  (len > req->content_len)
+  if (len > req->content_len)
   {
     len = req->content_len;
   }
@@ -92,39 +104,69 @@ esp_err_t httpReqSerailNumberPut(httpd_req_t *req)
   if (ret <= 0)
   {
     httpd_resp_send_408(req);
-    return ESP_FAIL;
+    status = ESP_FAIL;
   }
   else
   {
-    cJSON* content = cJSON_Parse(rxBuffer); // Parse JSON data
+    cJSON *content = cJSON_Parse(rxBuffer); // Parse JSON data
 
-    if (content == NULL) {
-        // Parsing failed
-        printf("Failed to parse JSON data.\n");
-        return ESP_FAIL;
-    }
-
-    // Extract values from JSON object
-    cJSON* serialNumber = cJSON_GetObjectItem(content, "serialNumber");
-    cJSON* url = cJSON_GetObjectItem(content, "url");
-
-    if (serialNumber != NULL && serialNumber->type == cJSON_String)
+    if (content == NULL)
     {
-      strcpy(debugSerialNumber, serialNumber->valuestring);
-      printf("serial number: %s\n", debugSerialNumber);
+      // Parsing failed
+      printf("Failed to parse JSON data.\n");
+      status = ESP_FAIL;
     }
-    if (url != NULL && url->type == cJSON_String)
+    else
     {
+
+      // Extract values from JSON object
+      cJSON *serialNumber = cJSON_GetObjectItem(content, "serialNumber");
+      cJSON *url = cJSON_GetObjectItem(content, "url");
+
+      if (serialNumber == NULL)
+      {
+        printf("Failed to parse JSON \"serialNumber\" data.\n");
+        status = ESP_FAIL;
+      }
+      else if (serialNumber->type != cJSON_String)
+      {
+        printf("Failed to parse JSON serial number type.\n");
+        status = ESP_FAIL;
+      }
+      else if (sscanf(serialNumber->valuestring, "%d", &debugSerialNumber) != 1)
+      {
+        printf("Failed to parse JSON serial number data.\n");
+        status = ESP_FAIL;
+      }
+      else
+      {
+        printf("serial number: %d\n", debugSerialNumber);
+      }
+
+      if (url == NULL)
+      {
+        printf("Failed to parse JSON \"serial number url\" data.\n");
+        status = ESP_FAIL;
+      }
+      else if (url->type != cJSON_String)
+      {
+        printf("Failed to parse JSON serial number url type.\n");
+        status = ESP_FAIL;
+      }
+      else
+      {
+        strcpy(debugIqUrl, url->valuestring);
         printf("url: %s\n", url->valuestring);
-    }
+      }
 
-    cJSON_Delete(content);
+      cJSON_Delete(content);
+    }
   }
 
   /* Respond with empty body */
   httpd_resp_send(req, NULL, 0);
 
-  return ESP_OK;
+  return status;
 }
 
 
@@ -212,11 +254,13 @@ esp_err_t httpReqSsidAllPut(httpd_req_t *req)
 
     if (ssid != NULL && ssid->type == cJSON_String)
     {
+      strcpy(debugSsid, ssid->valuestring);
         printf("ssid: %s\n", ssid->valuestring);
     }
     if (password != NULL && password->type == cJSON_String)
     {
-        printf("password: %s\n", password->valuestring);
+      strcpy(debugWifiPaasword, password->valuestring);
+        printf("password: %s\n", debugWifiPaasword);
     }
 
     cJSON_Delete(content);
@@ -241,17 +285,42 @@ esp_err_t httpReqSettingsGet(httpd_req_t *req)
 
   cJSON* ampsObject = cJSON_CreateObject();
   cJSON_AddItemToObject(ampsObject, "allowed", ampsAllowedArray);
-  cJSON_AddItemToObject(ampsObject, "current", cJSON_CreateNumber(16));
+  cJSON_AddItemToObject(ampsObject, "current", cJSON_CreateNumber(debugCurrentAllowed));
 
   cJSON* ocppObject = cJSON_CreateObject();
-  cJSON_AddItemToObject(ocppObject, "url", cJSON_CreateString(""));
+  cJSON_AddItemToObject(ocppObject, "url", cJSON_CreateString(debugOcppUrl));
+
+  cJSON* phaseAvailableArray = cJSON_CreateArray();
+  cJSON_AddItemToArray(phaseAvailableArray, cJSON_CreateNumber(1));
+  cJSON_AddItemToArray(phaseAvailableArray, cJSON_CreateNumber(3));
+
+  cJSON* phaseAvailableObject = cJSON_CreateObject();
+  cJSON_AddItemToObject(phaseAvailableObject, "allowed", phaseAvailableArray);
+  cJSON_AddItemToObject(phaseAvailableObject, "current", cJSON_CreateNumber(debugPhaseAvailable));
+
+  cJSON* phasesOrderArray = cJSON_CreateArray();
+  cJSON_AddItemToArray(phasesOrderArray, cJSON_CreateString("L1-L2-L3"));
+  cJSON_AddItemToArray(phasesOrderArray, cJSON_CreateString("L1-L3-L2"));
+  cJSON_AddItemToArray(phasesOrderArray, cJSON_CreateString("L2-L1-L3"));
+  cJSON_AddItemToArray(phasesOrderArray, cJSON_CreateString("L2-L3-L1"));
+  cJSON_AddItemToArray(phasesOrderArray, cJSON_CreateString("L3-L1-L2"));
+  cJSON_AddItemToArray(phasesOrderArray, cJSON_CreateString("L3-L2-L1"));
+
+  cJSON* phaseOrderObject = cJSON_CreateObject();
+  cJSON_AddItemToObject(phaseOrderObject, "allowed", phasesOrderArray);
+  cJSON_AddItemToObject(phaseOrderObject, "current", cJSON_CreateString(debugPhaseOrder));
 
   // Create the root cJSON object and add nested objects and values
   cJSON* jsonRoot = cJSON_CreateObject();
   cJSON_AddItemToObject(jsonRoot, "amps", ampsObject);
-  cJSON_AddItemToObject(jsonRoot, "firmwareVersion", cJSON_CreateString("0.0.1"));
+  cJSON_AddItemToObject(jsonRoot, "firmwareVersion", cJSON_CreateString(debugFirmwareVersion));
   cJSON_AddItemToObject(jsonRoot, "ocpp", ocppObject);
-  cJSON_AddItemToObject(jsonRoot, "serialNumber", cJSON_CreateString(debugSerialNumber));
+  cJSON_AddItemToObject(jsonRoot, "phaseAvailable", phaseAvailableObject);
+  cJSON_AddItemToObject(jsonRoot, "phaseOrder", phaseOrderObject);
+  char strSerialNumber[12] = {0};
+  printf("serial number: %d\n", debugSerialNumber);
+  snprintf(strSerialNumber, sizeof(strSerialNumber), "%d", debugSerialNumber);
+  cJSON_AddItemToObject(jsonRoot, "serialNumber", cJSON_CreateString(strSerialNumber));
 
   // Convert cJSON object to JSON string
   char* jsonString = cJSON_Print(jsonRoot);
@@ -264,7 +333,7 @@ esp_err_t httpReqSettingsGet(httpd_req_t *req)
   }
 
   // Print the JSON string
-  printf("\n%s\n", jsonString);
+  // printf("\n%s\n", jsonString);
 
   uint16_t len = strlen(jsonString);
   httpd_resp_set_type(req, "application/json");  // Set content type to text/plain
@@ -312,12 +381,15 @@ esp_err_t httpReqSettingsPut (httpd_req_t *req)
     printf("Parse PUT settings\n");
     cJSON *ampsObject = cJSON_GetObjectItem(content, "amps");
     cJSON *ocppObject = cJSON_GetObjectItem(content, "ocpp");
+    cJSON *phaseAvailableObject = cJSON_GetObjectItem(content, "phaseAvailable");
+    cJSON *phaseOrderObject = cJSON_GetObjectItem(content, "phaseOrder");
 
     if (ocppObject != nullptr)
     {
       cJSON* url = cJSON_GetObjectItem(ocppObject, "url");
       if (url != NULL && url->type == cJSON_String)
       {
+        strcpy(debugOcppUrl, url->valuestring);
         printf("occp url: %s\n", url->valuestring);
       }
     }
@@ -327,7 +399,28 @@ esp_err_t httpReqSettingsPut (httpd_req_t *req)
       cJSON *current = cJSON_GetObjectItem(ampsObject, "current");
       if (current != NULL && current->type == cJSON_Number)
       {
+        debugCurrentAllowed = current->valueint;
         printf("current: %d\n", current->valueint);
+      }
+    }
+
+    if (phaseOrderObject != nullptr)
+    {
+      cJSON* current = cJSON_GetObjectItem(phaseOrderObject, "current");
+      if (current != NULL && current->type == cJSON_String)
+      {
+        strcpy(debugPhaseOrder, current->valuestring);
+        printf("phases order: %s\n", current->valuestring);
+      }
+    }
+
+    if (phaseAvailableObject != nullptr)
+    {
+      cJSON *current = cJSON_GetObjectItem(phaseAvailableObject, "current");
+      if (current != NULL && current->type == cJSON_Number)
+      {
+        debugPhaseAvailable = current->valueint;
+        printf("phases available: %d\n", current->valueint);
       }
     }
 
@@ -369,6 +462,33 @@ void taskApp( void *arg )
 
   while(1)
   {
+    /**
+     * set host name
+     */
+    char const* currentHostname;
+    if (tcpip_adapter_get_hostname(TCPIP_ADAPTER_IF_STA, &currentHostname) == ESP_OK)
+    {
+      char hostname[20];
+      snprintf(hostname, sizeof(hostname),"IQ-home_%08d", debugSerialNumber );
+
+      printf("host name: %s\n", currentHostname);
+      if (strcmp(currentHostname, hostname) != 0)
+      {
+        printf("new host name: %s\n", hostname);
+        ESP_ERROR_CHECK(tcpip_adapter_set_hostname(TCPIP_ADAPTER_IF_STA, hostname));
+      }
+    }
+
+    /**
+     * check for connected to AP/wifi
+     */
+    if (strlen(debugSsid) > 0)
+    {
+      if (wifiap_isApMode() == true)
+      {
+        ESP_ERROR_CHECK(wifiap_connectToAp(debugSsid, debugWifiPaasword));
+      }
+    }
 
     vTaskDelay(10000 / portTICK_PERIOD_MS);
     printf("APP, free heap size: %d\n", esp_get_free_heap_size());

@@ -60,10 +60,10 @@ void taskWebserver( void *arg )
 
 		printf("WEB\n");
 
-        wifi_ap_record_t record[20];
-        uint16_t count;
-        count = wifiap_scan(record, 20);
-        printf("AP count = %d\n\r", count);
+//        wifi_ap_record_t record[20];
+//        uint16_t count;
+//        count = wifiap_scan(record, 20);
+//        printf("AP count = %d\n\r", count);
 		vTaskDelay(100000/ portTICK_PERIOD_MS);
 	}
 }

@@ -115,6 +115,7 @@ Webserver::Webserver(void)
   if (server == NULL) // only support one server at the time
   {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+    config.max_uri_handlers = 12;
 
     // Start the httpd server
     ESP_LOGI(__FILE__, "Starting server on port: '%d'", config.server_port);
