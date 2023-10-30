@@ -12,6 +12,8 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string>
+#include <lwip/sockets.h>
+#include <arpa/inet.h>
 
 #include "app.h"
 #include "webserver.h"
@@ -29,6 +31,9 @@ namespace  // anonymous
 /*------------------------------------------------------------------------------
                         Constant declarations
 ------------------------------------------------------------------------------*/
+
+const uint8_t udpReqString[] = "IQ-PLUG_CHARGER_DISCOVERY";
+const uint8_t udpResString[] = "IQ-PLUG_CHARGER_FOUND_"; // + serial number
 
 /*------------------------------------------------------------------------------
                         Type declarations
@@ -87,7 +92,6 @@ esp_err_t httpReqSerailNumberGet(httpd_req_t *req)
 esp_err_t httpReqSerailNumberPut (httpd_req_t *req)
 {
 
-  char buf;
   int ret;
   esp_err_t status = ESP_OK;
 
@@ -219,8 +223,6 @@ esp_err_t httpReqSsidAllGet(httpd_req_t *req)
 
 esp_err_t httpReqSsidAllPut(httpd_req_t *req)
 {
-
-  char buf;
   int ret;
 
   char rxBuffer[200];
@@ -348,8 +350,6 @@ esp_err_t httpReqSettingsGet(httpd_req_t *req)
 
 esp_err_t httpReqSettingsPut (httpd_req_t *req)
 {
-
-  char buf;
   int ret;
 
   char rxBuffer[200];
@@ -441,12 +441,103 @@ esp_err_t httpReqSettingsPut (httpd_req_t *req)
 namespace APP
 {
 
+class UdpSocket
+{
+private:
+  sockaddr_in _socketAddrIn;
+  sockaddr_in _socketAddrOut;
+
+public:
+  static int sockfd;
+
+  UdpSocket(int port);
+  ssize_t read(uint8_t* dataBuffer, ssize_t length);
+  ssize_t write(uint8_t* dataBuffer, ssize_t length);
+};
+
+int UdpSocket::sockfd = 0;
+
+UdpSocket::UdpSocket(int port)
+{
+  if (sockfd == 0)
+  {
+    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd < 0)
+    {
+      ESP_LOGE(__FILE__, "UDP socket creation failed!");
+    }
+  }
+
+  if (sockfd > 0)
+  {
+    // Set up the server address structure
+    memset(&_socketAddrIn, 0, sizeof(_socketAddrIn));
+    memset(&_socketAddrOut, 0, sizeof(_socketAddrOut));
+    _socketAddrIn.sin_family = AF_INET;
+    _socketAddrIn.sin_port = htons(port);
+    _socketAddrIn.sin_addr.s_addr = htonl(INADDR_ANY);
+
+    _socketAddrOut.sin_family = AF_INET;
+    _socketAddrOut.sin_port = htons(port); // important to set out port number
+    _socketAddrOut.sin_addr.s_addr = htonl(INADDR_ANY);
+
+
+    // Bind the socket to the specified port
+    if (bind(sockfd, (struct sockaddr*) &_socketAddrIn, sizeof(_socketAddrIn)) < 0)
+    {
+      ESP_LOGE(__FILE__, "UDP socket bind failed!");
+      close(sockfd);
+      sockfd = 0;
+    }
+  }
+
+}
+
+ssize_t UdpSocket::read(uint8_t* dataBuffer, ssize_t length)
+{
+  ssize_t count = 0;
+
+  // Buffer to receive incoming data
+  memset(dataBuffer, 0, length);
+
+  // Receive data from clients
+  socklen_t clientAddrLen = sizeof(_socketAddrIn);
+  count = recvfrom(sockfd, dataBuffer, length, 0, (struct sockaddr*) &_socketAddrIn, &clientAddrLen);
+  if (count < 0)
+  {
+    ESP_LOGI(__FILE__, "UDP Error receiving data!");
+  }
+  else
+  {
+    ESP_LOGI(__FILE__, "UDP Received data from %s: port: %d", inet_ntoa(_socketAddrIn.sin_addr), ntohs(_socketAddrOut.sin_port));
+  }
+
+  return count;
+}
+
+ssize_t UdpSocket::write(uint8_t* dataBuffer, ssize_t length)
+{
+  ssize_t count = 0;
+
+  _socketAddrOut.sin_addr = _socketAddrIn.sin_addr;
+  count = sendto(sockfd, dataBuffer, length, 0, (struct sockaddr*) &_socketAddrOut, sizeof(_socketAddrOut));
+
+  // Send data to the server
+  if (count != length)
+  {
+    ESP_LOGI(__FILE__, "UDP Error sending data!");
+  }
+  else
+  {
+    ESP_LOGI(__FILE__, "UDP Data sent successfully to %s: port: %d", inet_ntoa(_socketAddrOut.sin_addr), ntohs(_socketAddrOut.sin_port));
+
+  }
+
+  return count;
+}
+
 void taskApp( void *arg )
 {
-
-
-
-
   auto webServer = Webserver();
 
   webServer.getCbAdd("/iq-plug/discover", httpReqSerailNumberGet);
@@ -459,6 +550,9 @@ void taskApp( void *arg )
   webServer.putCbAdd("/api/settings", httpReqSettingsPut);
 
   printf("webServer URI GET CB created.");
+
+  auto udpSocket = UdpSocket(8370);
+  uint32_t delayMs = 10000;
 
   while(1)
   {
@@ -482,17 +576,41 @@ void taskApp( void *arg )
     /**
      * check for connected to AP/wifi
      */
+    delayMs = 10000;
+
     if (strlen(debugSsid) > 0)
     {
       if (wifiap_isApMode() == true)
       {
         ESP_ERROR_CHECK(wifiap_connectToAp(debugSsid, debugWifiPaasword));
       }
+      else
+      {
+        /**
+         * run UDP socket if wifi connection is up
+         */
+        if (wifiap_isWifiUp() == true)
+        {
+          delayMs = 100;
+          uint8_t dataBuffer[40] = {0};
+
+          ESP_LOGI(__FILE__, "waiting for UDP packet!");
+          ssize_t rxCount = udpSocket.read(dataBuffer, 40);
+
+          if (memcmp(dataBuffer, udpReqString, sizeof(udpReqString) - 1) == 0)
+          {
+            uint8_t txData[40];
+            size_t txLen;
+            txLen = snprintf((char*)txData, sizeof(txData), "%s%08d", udpResString, debugSerialNumber);
+            udpSocket.write(txData, txLen);
+          }
+
+        }
+      }
     }
 
-    vTaskDelay(10000 / portTICK_PERIOD_MS);
+    vTaskDelay(delayMs / portTICK_PERIOD_MS);
     printf("APP, free heap size: %d\n", esp_get_free_heap_size());
-
   }
 
 }

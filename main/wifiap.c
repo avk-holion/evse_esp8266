@@ -185,6 +185,27 @@ bool wifiap_isApMode(void)
   return apMode;
 }
 
+
+/*------------------------------------------------------------------------------
+*
+* return true if connected to wifi
+*
+* @retval result return true if connected to wifi
+* ----------------------------------------------------------------------------*/
+bool wifiap_isWifiUp(void)
+{
+  bool result = false;
+
+  uint32_t uxBits;
+  uxBits = xEventGroupWaitBits(wifi_event_group, WIFI_CONNECTED_BIT, false, true, 0);
+
+  if (uxBits & WIFI_CONNECTED_BIT)
+  {
+    result = true;
+  }
+
+  return result;
+}
 /*------------------------------------------------------------------------------
 *
 * @param[in,out] ssid ssid to connect too

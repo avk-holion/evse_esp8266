@@ -25,6 +25,7 @@
 									<listOptionValue builtIn="false" value="&quot;C:\msys32\home\kh\esp\ESP8266_RTOS_SDK\components\log\include&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;C:\msys32\home\kh\esp\ESP8266_RTOS_SDK\components\json\cJSON&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;C:\msys32\home\kh\esp\ESP8266_RTOS_SDK\components\tcpip_adapter\include&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;C:\msys32\home\kh\esp\ESP8266_RTOS_SDK\components\lwip\lwip\src\include&quot;"/>
 								</option>
 								<inputType id="cdt.managedbuild.tool.gnu.assembler.input.897984274" superClass="cdt.managedbuild.tool.gnu.assembler.input"/>
 							</tool>
@@ -35,6 +36,7 @@
 									<listOptionValue builtIn="false" value="&quot;C:\msys32\home\kh\esp\ESP8266_RTOS_SDK\components\log\include&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;C:\msys32\home\kh\esp\ESP8266_RTOS_SDK\components\json\cJSON&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;C:\msys32\home\kh\esp\ESP8266_RTOS_SDK\components\tcpip_adapter\include&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;C:\msys32\home\kh\esp\ESP8266_RTOS_SDK\components\lwip\lwip\src\include&quot;"/>
 								</option>
 								<inputType id="cdt.managedbuild.tool.gnu.cpp.compiler.input.cygwin.2121689136" superClass="cdt.managedbuild.tool.gnu.cpp.compiler.input.cygwin"/>
 							</tool>
@@ -44,6 +46,7 @@
 									<listOptionValue builtIn="false" value="&quot;C:\msys32\home\kh\esp\ESP8266_RTOS_SDK\components\log\include&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;C:\msys32\home\kh\esp\ESP8266_RTOS_SDK\components\json\cJSON&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;C:\msys32\home\kh\esp\ESP8266_RTOS_SDK\components\tcpip_adapter\include&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;C:\msys32\home\kh\esp\ESP8266_RTOS_SDK\components\lwip\lwip\src\include&quot;"/>
 								</option>
 								<inputType id="cdt.managedbuild.tool.gnu.c.compiler.input.cygwin.478600824" superClass="cdt.managedbuild.tool.gnu.c.compiler.input.cygwin"/>
 							</tool>
