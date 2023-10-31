@@ -12,15 +12,17 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string>
-#include <lwip/sockets.h>
-#include <arpa/inet.h>
+
 
 #include "app.h"
 #include "webserver.h"
 #include "esp_event_base.h"
 #include "esp_event.h"
 #include "esp_log.h"
+#include "esp_spiffs.h"
 #include "cJSON.h"
+
+#include "udpDaemon.h"
 #include "wifiap.h"
 /*------------------------------------------------------------------------------
                         Macro declarations
@@ -32,8 +34,9 @@ namespace  // anonymous
                         Constant declarations
 ------------------------------------------------------------------------------*/
 
-const uint8_t udpReqString[] = "IQ-PLUG_CHARGER_DISCOVERY";
-const uint8_t udpResString[] = "IQ-PLUG_CHARGER_FOUND_"; // + serial number
+const int udpPort = 8370;
+const char udpReqString[] = "IQ-PLUG_CHARGER_DISCOVERY";
+const char udpResString[] = "IQ-PLUG_CHARGER_FOUND_"; // + serial number
 
 /*------------------------------------------------------------------------------
                         Type declarations
@@ -441,103 +444,42 @@ esp_err_t httpReqSettingsPut (httpd_req_t *req)
 namespace APP
 {
 
-class UdpSocket
-{
-private:
-  sockaddr_in _socketAddrIn;
-  sockaddr_in _socketAddrOut;
-
-public:
-  static int sockfd;
-
-  UdpSocket(int port);
-  ssize_t read(uint8_t* dataBuffer, ssize_t length);
-  ssize_t write(uint8_t* dataBuffer, ssize_t length);
-};
-
-int UdpSocket::sockfd = 0;
-
-UdpSocket::UdpSocket(int port)
-{
-  if (sockfd == 0)
-  {
-    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sockfd < 0)
-    {
-      ESP_LOGE(__FILE__, "UDP socket creation failed!");
-    }
-  }
-
-  if (sockfd > 0)
-  {
-    // Set up the server address structure
-    memset(&_socketAddrIn, 0, sizeof(_socketAddrIn));
-    memset(&_socketAddrOut, 0, sizeof(_socketAddrOut));
-    _socketAddrIn.sin_family = AF_INET;
-    _socketAddrIn.sin_port = htons(port);
-    _socketAddrIn.sin_addr.s_addr = htonl(INADDR_ANY);
-
-    _socketAddrOut.sin_family = AF_INET;
-    _socketAddrOut.sin_port = htons(port); // important to set out port number
-    _socketAddrOut.sin_addr.s_addr = htonl(INADDR_ANY);
-
-
-    // Bind the socket to the specified port
-    if (bind(sockfd, (struct sockaddr*) &_socketAddrIn, sizeof(_socketAddrIn)) < 0)
-    {
-      ESP_LOGE(__FILE__, "UDP socket bind failed!");
-      close(sockfd);
-      sockfd = 0;
-    }
-  }
-
-}
-
-ssize_t UdpSocket::read(uint8_t* dataBuffer, ssize_t length)
-{
-  ssize_t count = 0;
-
-  // Buffer to receive incoming data
-  memset(dataBuffer, 0, length);
-
-  // Receive data from clients
-  socklen_t clientAddrLen = sizeof(_socketAddrIn);
-  count = recvfrom(sockfd, dataBuffer, length, 0, (struct sockaddr*) &_socketAddrIn, &clientAddrLen);
-  if (count < 0)
-  {
-    ESP_LOGI(__FILE__, "UDP Error receiving data!");
-  }
-  else
-  {
-    ESP_LOGI(__FILE__, "UDP Received data from %s: port: %d", inet_ntoa(_socketAddrIn.sin_addr), ntohs(_socketAddrOut.sin_port));
-  }
-
-  return count;
-}
-
-ssize_t UdpSocket::write(uint8_t* dataBuffer, ssize_t length)
-{
-  ssize_t count = 0;
-
-  _socketAddrOut.sin_addr = _socketAddrIn.sin_addr;
-  count = sendto(sockfd, dataBuffer, length, 0, (struct sockaddr*) &_socketAddrOut, sizeof(_socketAddrOut));
-
-  // Send data to the server
-  if (count != length)
-  {
-    ESP_LOGI(__FILE__, "UDP Error sending data!");
-  }
-  else
-  {
-    ESP_LOGI(__FILE__, "UDP Data sent successfully to %s: port: %d", inet_ntoa(_socketAddrOut.sin_addr), ntohs(_socketAddrOut.sin_port));
-
-  }
-
-  return count;
-}
 
 void taskApp( void *arg )
 {
+  esp_vfs_spiffs_conf_t conf =
+    {
+        .base_path = "/spiffs",
+        .partition_label = NULL,
+        .max_files = 5,
+        .format_if_mount_failed = true
+    };
+
+  // Mount SPIFFS
+  esp_err_t ret = esp_vfs_spiffs_register(&conf);
+  if (ret != ESP_OK)
+  {
+    ESP_LOGE(__FILE__, "Failed to mount SPIFFS (%s)", esp_err_to_name(ret));
+    while (1);
+  }
+
+  // SPIFFS mounted successfully
+  ESP_LOGI(__FILE__, "SPIFFS mounted successfully");
+
+  FILE* file = fopen("/spiffs/appSettings.txt", "r");
+  if (file)
+  {
+    size_t fcount = 0;
+
+    fcount = fread(&debugSerialNumber, sizeof(debugSerialNumber), 1, file);
+    ESP_LOGI(__FILE__, "Read from file file: %d, %d", fcount, debugSerialNumber);
+    fclose(file);
+  }
+  else
+  {
+    ESP_LOGI(__FILE__, "Failed to open file for reading");
+  }
+
   auto webServer = Webserver();
 
   webServer.getCbAdd("/iq-plug/discover", httpReqSerailNumberGet);
@@ -551,7 +493,6 @@ void taskApp( void *arg )
 
   printf("webServer URI GET CB created.");
 
-  auto udpSocket = UdpSocket(8370);
   uint32_t delayMs = 10000;
 
   while(1)
@@ -591,21 +532,33 @@ void taskApp( void *arg )
          */
         if (wifiap_isWifiUp() == true)
         {
-          delayMs = 100;
-          uint8_t dataBuffer[40] = {0};
+          delayMs = 1000;
 
-          ESP_LOGI(__FILE__, "waiting for UDP packet!");
-          ssize_t rxCount = udpSocket.read(dataBuffer, 40);
-
-          if (memcmp(dataBuffer, udpReqString, sizeof(udpReqString) - 1) == 0)
-          {
-            uint8_t txData[40];
-            size_t txLen;
-            txLen = snprintf((char*)txData, sizeof(txData), "%s%08d", udpResString, debugSerialNumber);
-            udpSocket.write(txData, txLen);
-          }
+          char txData[40];
+          snprintf((char*) txData, sizeof(txData), "%s%08d\n", udpResString, debugSerialNumber);
+          UdpDaemon_broadcastStart(udpPort, udpReqString, txData);
 
         }
+      }
+    }
+
+    /**
+     * Write data to file
+     */
+    if (debugSerialNumber > 0)
+    {
+      FILE* file = fopen("/spiffs/appSettings.txt", "w");
+      if (file)
+      {
+        size_t fcount = 0;
+
+        fcount = fwrite(&debugSerialNumber, sizeof(debugSerialNumber), 1, file);
+        ESP_LOGI(__FILE__, "Write to file file: %d, %d", fcount, debugSerialNumber);
+        fclose(file);
+      }
+      else
+      {
+        ESP_LOGI(__FILE__, "Failed to open file for writting");
       }
     }
 

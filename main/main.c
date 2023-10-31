@@ -11,6 +11,7 @@
 
 #include "app.h"
 #include "debug.h"
+#include "udpDaemon.h"
 
 void taskSpi( void *arg );
 void taskWebserver( void *arg );
@@ -25,6 +26,7 @@ void app_main(void)
   xTaskCreate(taskWebserver, "web server", 6000, NULL, 1, NULL);
   xTaskCreate(taskDebug, "debug task", 4000, NULL, 3, NULL);
   xTaskCreate(taskApp, "app", 6000, NULL, 3, NULL);
+  xTaskCreate(taskUdpDaemon, "udp", 2000, NULL, 1, NULL);
 
 
 
