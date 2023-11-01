@@ -145,8 +145,9 @@ void taskDebug( void *arg )
 //      printf("webServer URI GET CB created.");
 //    }
 
+    printf("Task \"%s\" remaining stack size: %u bytes\n", pcTaskGetName(NULL), uxTaskGetStackHighWaterMark(NULL));
+    printf("DEBUG, free heap size: %d\n", esp_get_free_heap_size());
     vTaskDelay(10000 / portTICK_PERIOD_MS);
-    printf("DEBUG\n");
   }
 
 }

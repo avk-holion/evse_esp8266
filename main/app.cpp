@@ -13,6 +13,9 @@
 #include <stdio.h>
 #include <string>
 
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/event_groups.h"
 
 #include "app.h"
 #include "webserver.h"
@@ -38,15 +41,55 @@ const int udpPort = 8370;
 const char udpReqString[] = "IQ-PLUG_CHARGER_DISCOVERY";
 const char udpResString[] = "IQ-PLUG_CHARGER_FOUND_"; // + serial number
 
+const char fileDeployment[] = "/app/deploy_data";
+const char fileWifi[] = "/app/wifi_settings";
+const char fileOcpp[] = "/app/ocpp_settings";
 /*------------------------------------------------------------------------------
                         Type declarations
 ------------------------------------------------------------------------------*/
 
+typedef enum
+{
+  DATA_UPDATE_EVENT_SERIAL_NO           = 0x01,
+  DATA_UPDATE_EVENT_URL                 = 0x02,
+  DATA_UPDATE_EVENT_SSID                = 0x04,
+  DATA_UPDATE_EVENT_PASSWORD            = 0x08,
+  DATA_UPDATE_EVENT_AMPS                = 0x10,
+  DATA_UPDATE_EVENT_OCPP                = 0x20,
+  DATA_UPDATE_EVENT_PHASES_AVAILABLE    = 0x40,
+  DATA_UPDATE_EVENT_PHASE_ORDER         = 0x80,
+  DATA_UPDATE_EVENT_ALL                 = 0xFF,
+} dataUpdateEventGroup_t;
+
+typedef struct
+{
+  uint32_t version;
+  int serialNumber;
+  char url[35];
+  int currentAllowed;
+  int phaseAvailable;
+  char phaseOrder[10];
+}deployment_t;
+
+typedef struct
+{
+  uint32_t version;
+  char url[150];
+}ocpp_t;
+
+typedef struct
+{
+  uint32_t version;
+  char Ssid[33];
+  char password[64];
+}wifi_t;
 
 
 /*------------------------------------------------------------------------------
                         Variable declarations
 ------------------------------------------------------------------------------*/
+static EventGroupHandle_t dataUpdateEventGroup = NULL;
+
 char debugFirmwareVersion[] = "0.0.0.1";
 int debugSerialNumber = 0;
 char debugIqUrl[35] = "";
@@ -148,6 +191,7 @@ esp_err_t httpReqSerailNumberPut (httpd_req_t *req)
       else
       {
         printf("serial number: %d\n", debugSerialNumber);
+        xEventGroupSetBits(dataUpdateEventGroup, DATA_UPDATE_EVENT_SERIAL_NO);
       }
 
       if (url == NULL)
@@ -164,6 +208,7 @@ esp_err_t httpReqSerailNumberPut (httpd_req_t *req)
       {
         strcpy(debugIqUrl, url->valuestring);
         printf("url: %s\n", url->valuestring);
+        xEventGroupSetBits(dataUpdateEventGroup, DATA_UPDATE_EVENT_URL);
       }
 
       cJSON_Delete(content);
@@ -260,12 +305,14 @@ esp_err_t httpReqSsidAllPut(httpd_req_t *req)
     if (ssid != NULL && ssid->type == cJSON_String)
     {
       strcpy(debugSsid, ssid->valuestring);
-        printf("ssid: %s\n", ssid->valuestring);
+      printf("ssid: %s\n", ssid->valuestring);
+      xEventGroupSetBits(dataUpdateEventGroup, DATA_UPDATE_EVENT_SSID);
     }
     if (password != NULL && password->type == cJSON_String)
     {
       strcpy(debugWifiPaasword, password->valuestring);
-        printf("password: %s\n", debugWifiPaasword);
+      printf("password: %s\n", debugWifiPaasword);
+      xEventGroupSetBits(dataUpdateEventGroup, DATA_UPDATE_EVENT_PASSWORD);
     }
 
     cJSON_Delete(content);
@@ -394,6 +441,7 @@ esp_err_t httpReqSettingsPut (httpd_req_t *req)
       {
         strcpy(debugOcppUrl, url->valuestring);
         printf("occp url: %s\n", url->valuestring);
+        xEventGroupSetBits(dataUpdateEventGroup, DATA_UPDATE_EVENT_OCPP);
       }
     }
 
@@ -404,6 +452,7 @@ esp_err_t httpReqSettingsPut (httpd_req_t *req)
       {
         debugCurrentAllowed = current->valueint;
         printf("current: %d\n", current->valueint);
+        xEventGroupSetBits(dataUpdateEventGroup, DATA_UPDATE_EVENT_AMPS);
       }
     }
 
@@ -414,6 +463,7 @@ esp_err_t httpReqSettingsPut (httpd_req_t *req)
       {
         strcpy(debugPhaseOrder, current->valuestring);
         printf("phases order: %s\n", current->valuestring);
+        xEventGroupSetBits(dataUpdateEventGroup, DATA_UPDATE_EVENT_PHASE_ORDER);
       }
     }
 
@@ -424,6 +474,7 @@ esp_err_t httpReqSettingsPut (httpd_req_t *req)
       {
         debugPhaseAvailable = current->valueint;
         printf("phases available: %d\n", current->valueint);
+        xEventGroupSetBits(dataUpdateEventGroup, DATA_UPDATE_EVENT_PHASES_AVAILABLE);
       }
     }
 
@@ -444,14 +495,242 @@ esp_err_t httpReqSettingsPut (httpd_req_t *req)
 namespace APP
 {
 
+void wifiDataStore(void)
+{
+  // wifi
+  wifi_t wifiData;
+  memset(&wifiData, 0, sizeof(wifiData));
+  FILE* fh = fopen(fileWifi, "w");
+
+  if (fh == nullptr)
+  {
+    ESP_LOGI(__FILE__, "Can not open file %s", fileWifi);
+  }
+  else
+  {
+    // set data to write
+    wifiData.version = 1;
+    strcpy(wifiData.Ssid, debugSsid);
+    strcpy(wifiData.password, debugWifiPaasword);
+
+    int count;
+    int fileSize = sizeof(wifiData);
+    count = fwrite(&wifiData, fileSize, 1, fh);
+    fclose(fh);
+
+    if (count != 1)
+    {
+      ESP_LOGE(__FILE__, "File not written correctly: %s: %d expected: %d", fileWifi, count, fileSize);
+    }
+    else
+    {
+      ESP_LOGI(__FILE__, "%s updated.", fileWifi);
+    }
+  }
+}
+
+void wifiDataRestore(void)
+{
+  // wifi
+  wifi_t wifiData;
+  memset(&wifiData, 0, sizeof(wifiData));
+  FILE* fh = fopen(fileWifi, "r");
+
+  if (fh == nullptr)
+  {
+    ESP_LOGI(__FILE__, "Can not open file %s", fileWifi);
+  }
+  else
+  {
+    int count;
+    int fileSize = sizeof(wifiData);
+    count = fread(&wifiData, fileSize, 1, fh);
+    fclose(fh);
+
+    if (count != 1)
+    {
+      ESP_LOGE(__FILE__, "File not read correctly: %s: %d", fileWifi, count);
+    }
+    else
+    {
+      if (wifiData.version != 1)
+      {
+        ESP_LOGE(__FILE__, "Do not support this version of the data structure: %d", wifiData.version);
+      }
+      else
+      {
+        // restore data
+        strcpy(debugSsid, wifiData.Ssid);
+        strcpy(debugWifiPaasword, wifiData.password);
+        ESP_LOGI(__FILE__, "%s restored.", fileWifi);
+      }
+    }
+  }
+}
+
+void deploymentDataStore(void)
+{
+  // deployment
+  deployment_t deploymentData;
+  memset(&deploymentData, 0, sizeof(deploymentData));
+  FILE* fh = fopen(fileDeployment, "w");
+
+  if (fh == nullptr)
+  {
+    ESP_LOGI(__FILE__, "Can not open file %s", fileDeployment);
+  }
+  else
+  {
+    // set data to write
+    deploymentData.version = 1;
+    deploymentData.serialNumber = debugSerialNumber;
+    strcpy(deploymentData.url, debugIqUrl);
+    deploymentData.currentAllowed = debugCurrentAllowed;
+    deploymentData.phaseAvailable = debugPhaseAvailable;
+    strcpy(deploymentData.phaseOrder, debugPhaseOrder);
+
+    int count;
+    int fileSize = sizeof(deploymentData);
+    count = fwrite(&deploymentData, fileSize, 1, fh);
+    fclose(fh);
+
+    if (count != 1)
+    {
+      ESP_LOGE(__FILE__, "File not written correctly: %s: %d expected: %d", fileDeployment, count, fileSize);
+    }
+    else
+    {
+      ESP_LOGI(__FILE__, "%s updated.", fileDeployment);
+    }
+  }
+}
+
+void deploymentDataRestore(void)
+{
+  // deployment
+  deployment_t deploymentData;
+  memset(&deploymentData, 0, sizeof(deploymentData));
+  FILE* fh = fopen(fileDeployment, "r");
+
+  if (fh == nullptr)
+  {
+    ESP_LOGI(__FILE__, "Can not open file %s", fileDeployment);
+  }
+  else
+  {
+    int count;
+    int fileSize = sizeof(deploymentData);
+    count = fread(&deploymentData, fileSize, 1, fh);
+    fclose(fh);
+
+    if (count != 1)
+    {
+      ESP_LOGE(__FILE__, "File not read correctly: %s: %d", fileDeployment, count);
+    }
+    else
+    {
+      if (deploymentData.version != 1)
+      {
+        ESP_LOGE(__FILE__, "Do not support this version of the data structure: %d", deploymentData.version);
+      }
+      else
+      {
+        // restore data
+
+        debugSerialNumber = deploymentData.serialNumber;
+        strcpy(debugIqUrl, deploymentData.url);
+        debugCurrentAllowed = deploymentData.currentAllowed;
+        debugPhaseAvailable = deploymentData.phaseAvailable;
+        strcpy(debugPhaseOrder, deploymentData.phaseOrder);
+
+        ESP_LOGI(__FILE__, "%s restored.", fileDeployment);
+      }
+    }
+  }
+}
+
+void ocppDataStore(void)
+{
+  // ocpp
+  ocpp_t ocppData;
+  memset(&ocppData, 0, sizeof(ocppData));
+
+  FILE* fh = fopen(fileOcpp, "w");
+
+  if (fh == nullptr)
+  {
+    ESP_LOGI(__FILE__, "Can not open file %s", fileOcpp);
+  }
+  else
+  {
+    // set data to write
+    ocppData.version = 1;
+    strcpy(ocppData.url, debugOcppUrl);
+
+    int count;
+    int fileSize = sizeof(ocppData);
+    count = fwrite(&ocppData, fileSize, 1, fh);
+    fclose(fh);
+
+    if (count != 1)
+    {
+      ESP_LOGE(__FILE__, "File not written correctly: %s: %d expected: %d", fileOcpp, count, fileSize);
+    }
+    else
+    {
+      ESP_LOGI(__FILE__, "%s updated.", fileOcpp);
+    }
+  }
+}
+
+void ocppDataRestore(void)
+{
+  // ocpp
+  ocpp_t ocppData;
+  memset(&ocppData, 0, sizeof(ocppData));
+
+  FILE* fh = fopen(fileOcpp, "r");
+
+  if (fh == nullptr)
+  {
+    ESP_LOGI(__FILE__, "Can not open file %s", fileOcpp);
+  }
+  else
+  {
+    int count;
+    int fileSize = sizeof(ocppData);
+    count = fread(&ocppData, fileSize, 1, fh);
+    fclose(fh);
+
+    if (count != 1)
+    {
+      ESP_LOGE(__FILE__, "File not read correctly: %s: %d", fileOcpp, count);
+    }
+    else
+    {
+      if (ocppData.version != 1)
+      {
+        ESP_LOGE(__FILE__, "Do not support this version of the data structure: %d", ocppData.version);
+      }
+      else
+      {
+        // restore data
+        strcpy(debugOcppUrl, ocppData.url);
+
+        ESP_LOGI(__FILE__, "%s restored.", fileOcpp);
+      }
+    }
+  }
+}
+
 
 void taskApp( void *arg )
 {
   esp_vfs_spiffs_conf_t conf =
     {
-        .base_path = "/spiffs",
+        .base_path = "/app",
         .partition_label = NULL,
-        .max_files = 5,
+        .max_files = 3,
         .format_if_mount_failed = true
     };
 
@@ -466,19 +745,22 @@ void taskApp( void *arg )
   // SPIFFS mounted successfully
   ESP_LOGI(__FILE__, "SPIFFS mounted successfully");
 
-  FILE* file = fopen("/spiffs/appSettings.txt", "r");
-  if (file)
-  {
-    size_t fcount = 0;
+  wifiDataRestore();
+  deploymentDataRestore();
+  ocppDataRestore();
 
-    fcount = fread(&debugSerialNumber, sizeof(debugSerialNumber), 1, file);
-    ESP_LOGI(__FILE__, "Read from file file: %d, %d", fcount, debugSerialNumber);
-    fclose(file);
+  wifiap_init(); // init wifi and event handler
+  if (strlen(debugSsid) > 0)
+  {
+    ESP_ERROR_CHECK(wifiap_connectToAp(debugSsid, debugWifiPaasword));
   }
   else
   {
-    ESP_LOGI(__FILE__, "Failed to open file for reading");
+    ESP_ERROR_CHECK(wifiap_startAp());
   }
+
+  dataUpdateEventGroup = xEventGroupCreate();
+
 
   auto webServer = Webserver();
 
@@ -493,7 +775,7 @@ void taskApp( void *arg )
 
   printf("webServer URI GET CB created.");
 
-  uint32_t delayMs = 10000;
+  uint32_t delayMs = 1000;
 
   while(1)
   {
@@ -506,7 +788,6 @@ void taskApp( void *arg )
       char hostname[20];
       snprintf(hostname, sizeof(hostname),"IQ-home_%08d", debugSerialNumber );
 
-      printf("host name: %s\n", currentHostname);
       if (strcmp(currentHostname, hostname) != 0)
       {
         printf("new host name: %s\n", hostname);
@@ -517,8 +798,6 @@ void taskApp( void *arg )
     /**
      * check for connected to AP/wifi
      */
-    delayMs = 10000;
-
     if (strlen(debugSsid) > 0)
     {
       if (wifiap_isApMode() == true)
@@ -532,8 +811,6 @@ void taskApp( void *arg )
          */
         if (wifiap_isWifiUp() == true)
         {
-          delayMs = 1000;
-
           char txData[40];
           snprintf((char*) txData, sizeof(txData), "%s%08d\n", udpResString, debugSerialNumber);
           UdpDaemon_broadcastStart(udpPort, udpReqString, txData);
@@ -545,25 +822,37 @@ void taskApp( void *arg )
     /**
      * Write data to file
      */
-    if (debugSerialNumber > 0)
-    {
-      FILE* file = fopen("/spiffs/appSettings.txt", "w");
-      if (file)
-      {
-        size_t fcount = 0;
+    uint32_t flags;
+    flags = xEventGroupWaitBits(dataUpdateEventGroup, DATA_UPDATE_EVENT_ALL, true, false, 0);
 
-        fcount = fwrite(&debugSerialNumber, sizeof(debugSerialNumber), 1, file);
-        ESP_LOGI(__FILE__, "Write to file file: %d, %d", fcount, debugSerialNumber);
-        fclose(file);
-      }
-      else
+    if (flags > 0)
+    {
+      ESP_LOGI(__FILE__, "SAVE data to file, flags: %02X", flags);
+
+      if ((flags & DATA_UPDATE_EVENT_SSID) ||
+          (flags & DATA_UPDATE_EVENT_PASSWORD))
       {
-        ESP_LOGI(__FILE__, "Failed to open file for writting");
+        // wifi
+        wifiDataStore();
+      }
+      if ((flags & DATA_UPDATE_EVENT_AMPS) ||
+          (flags & DATA_UPDATE_EVENT_PHASE_ORDER) ||
+          (flags & DATA_UPDATE_EVENT_SERIAL_NO) ||
+          (flags & DATA_UPDATE_EVENT_URL) ||
+          (flags & DATA_UPDATE_EVENT_PHASES_AVAILABLE))
+      {
+        // deployment
+        deploymentDataStore();
+      }
+      if (flags & DATA_UPDATE_EVENT_OCPP)
+      {
+        // deployment
+        ocppDataStore();
       }
     }
 
+    printf("Task \"%s\" remaining stack size: %u bytes\n", pcTaskGetName(NULL), uxTaskGetStackHighWaterMark(NULL));
     vTaskDelay(delayMs / portTICK_PERIOD_MS);
-    printf("APP, free heap size: %d\n", esp_get_free_heap_size());
   }
 
 }

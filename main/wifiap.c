@@ -29,6 +29,8 @@
 #include "lwip/err.h"
 #include "lwip/sys.h"
 
+#include "wifiap.h"
+
 /* The examples use WiFi configuration that you can set via project configuration menu.
 
    If you'd rather not, just change the below entries to strings with
@@ -104,46 +106,51 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
     }
 }
 
-void wifi_init_softap()
+esp_err_t wifiap_startAp(void)
 {
-    tcpip_adapter_init();
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-    tcpip_adapter_dhcps_stop(TCPIP_ADAPTER_IF_AP);
+  esp_err_t espErr = ESP_FAIL;
 
-    tcpip_adapter_ip_info_t ipInfo;
-    IP4_ADDR(&ipInfo.ip, 192,168,0,1);
-    //ipInfo.ip = 0xC0A80001; // 192.168.0.1
-    IP4_ADDR(&ipInfo.gw, 192,168,0,1);
-    //ipInfo.gw = 0xC0A80001; // 192.168.0.1
-    IP4_ADDR(&ipInfo.netmask, 255,255,255,0);
-    // ipInfo.netmask = 0xFFFFFF00; // 255.255.255.0
-    ESP_ERROR_CHECK(tcpip_adapter_set_ip_info(TCPIP_ADAPTER_IF_AP, &ipInfo));
-    tcpip_adapter_dhcps_start(TCPIP_ADAPTER_IF_AP);
+  if (wifiap_isWifiUp())
+  {
+    ESP_LOGI(TAG, "Stopping wifi:");
+    ESP_ERROR_CHECK(esp_wifi_stop());
+    xEventGroupWaitBits(wifi_event_group, WIFI_AP_STOPPED_BIT, false, true, portMAX_DELAY);
+  }
 
+  ESP_ERROR_CHECK (tcpip_adapter_dhcps_stop(TCPIP_ADAPTER_IF_AP));
 
+  tcpip_adapter_ip_info_t ipInfo;
+  IP4_ADDR(&ipInfo.ip, 192,168,0,1);
+  //ipInfo.ip = 0xC0A80001; // 192.168.0.1
+  IP4_ADDR(&ipInfo.gw, 192,168,0,1);
+  //ipInfo.gw = 0xC0A80001; // 192.168.0.1
+  IP4_ADDR(&ipInfo.netmask, 255,255,255,0);
+  // ipInfo.netmask = 0xFFFFFF00; // 255.255.255.0
+  ESP_ERROR_CHECK(tcpip_adapter_set_ip_info(TCPIP_ADAPTER_IF_AP, &ipInfo));
+  ESP_ERROR_CHECK(tcpip_adapter_dhcps_start(TCPIP_ADAPTER_IF_AP));
 
-    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL));
+  wifi_config_t wifi_config = {
+      .ap = {
+          .ssid = EXAMPLE_ESP_WIFI_SSID,
+          .ssid_len = strlen(EXAMPLE_ESP_WIFI_SSID),
+          .password = EXAMPLE_ESP_WIFI_PASS,
+          .max_connection = EXAMPLE_MAX_STA_CONN,
+          .authmode = WIFI_AUTH_WPA_WPA2_PSK
+      },
+  };
+  if (strlen(EXAMPLE_ESP_WIFI_PASS) == 0) {
+      wifi_config.ap.authmode = WIFI_AUTH_OPEN;
+  }
 
-    wifi_config_t wifi_config = {
-        .ap = {
-            .ssid = EXAMPLE_ESP_WIFI_SSID,
-            .ssid_len = strlen(EXAMPLE_ESP_WIFI_SSID),
-            .password = EXAMPLE_ESP_WIFI_PASS,
-            .max_connection = EXAMPLE_MAX_STA_CONN,
-            .authmode = WIFI_AUTH_WPA_WPA2_PSK
-        },
-    };
-    if (strlen(EXAMPLE_ESP_WIFI_PASS) == 0) {
-        wifi_config.ap.authmode = WIFI_AUTH_OPEN;
-    }
+  ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
+  ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config));
 
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config));
+  ESP_ERROR_CHECK(esp_wifi_start());
 
-    ESP_ERROR_CHECK(esp_wifi_start());
+  ESP_LOGI(TAG, "wifi_init_softap finished. SSID:%s password:%s", EXAMPLE_ESP_WIFI_SSID, EXAMPLE_ESP_WIFI_PASS);
+  espErr = ESP_OK;
 
-    ESP_LOGI(TAG, "wifi_init_softap finished. SSID:%s password:%s", EXAMPLE_ESP_WIFI_SSID, EXAMPLE_ESP_WIFI_PASS);
+  return espErr;
 }
 
 void wifiap_init()
@@ -157,7 +164,12 @@ void wifiap_init()
       wifi_event_group = xEventGroupCreate();
     }
 
-    wifi_init_softap();
+    tcpip_adapter_init();
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+
+    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL));
+
 }
 
 /*------------------------------------------------------------------------------
@@ -224,27 +236,28 @@ esp_err_t wifiap_connectToAp(char* ssid, char* password)
     ESP_LOGI(TAG, "Stopping wifi:");
     ESP_ERROR_CHECK(esp_wifi_stop());
     xEventGroupWaitBits(wifi_event_group, WIFI_AP_STOPPED_BIT, false, true, portMAX_DELAY);
-
-    wifi_config_t wifi_config = {0};
-
-    char* configSsid = (char*)wifi_config.sta.ssid;
-    strcpy(configSsid, ssid);
-    strcpy((char*)wifi_config.sta.password, password);
-    wifi_config.sta.bssid_set = 0;
-
-    ESP_LOGI(TAG, "Starting connect to AP: %s, %s", wifi_config.sta.ssid, wifi_config.sta.password);
-
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config));
-    ESP_ERROR_CHECK(esp_wifi_start());
-
-    // Wait for connection
-    xEventGroupWaitBits(wifi_event_group, WIFI_CONNECTED_BIT, false, true, portMAX_DELAY);
-    espErr = ESP_OK;
-
-    ESP_LOGI(TAG, "Connected to AP");
-
   }
+
+  wifi_config_t wifi_config = {0};
+
+  char* configSsid = (char*)wifi_config.sta.ssid;
+  strcpy(configSsid, ssid);
+  strcpy((char*)wifi_config.sta.password, password);
+  wifi_config.sta.bssid_set = 0;
+
+  ESP_LOGI(TAG, "Starting connect to AP: %s, %s", wifi_config.sta.ssid, wifi_config.sta.password);
+
+  ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+  ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config));
+  ESP_ERROR_CHECK(esp_wifi_start());
+
+  // Wait for connection
+  xEventGroupWaitBits(wifi_event_group, WIFI_CONNECTED_BIT, false, true, portMAX_DELAY);
+  espErr = ESP_OK;
+
+  ESP_LOGI(TAG, "Connected to AP");
+
+
 
 
 

@@ -175,6 +175,7 @@ void taskUdpDaemon(void* arg)
       ESP_LOGI(__FILE__, "wrong search key: %s, expected: %s", dataBuffer, udpSearchString);
     }
 
+    printf("Task \"%s\" remaining stack size: %u bytes\n", pcTaskGetName(NULL), uxTaskGetStackHighWaterMark(NULL));
   }
 }
 
