@@ -8,7 +8,7 @@
 /*------------------------------------------------------------------------------
                         header file
 ------------------------------------------------------------------------------*/
-#include <driver/spi.h>
+#include "driver/spi.h"
 #include <stdint.h>
 #include "data_stream_i.h"
 /*------------------------------------------------------------------------------
@@ -35,6 +35,8 @@ class EspSpiMaster : public INTERFACES::DataStream_i
 private:
   spi_host_t _host;
   size_t _handle;
+  spi_config_t _config;
+
 public:
   EspSpiMaster(spi_host_t host, uint8_t* rxBuffer, uint16_t rxBufferSize);
   ~EspSpiMaster() {};

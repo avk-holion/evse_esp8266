@@ -23,7 +23,7 @@
 #include "modbusWallbox.h"
 #include "modbus.h"
 #include "modbus_master.h"
-
+#include "esp_spi.h"
 
 
 /*------------------------------------------------------------------------------
@@ -131,25 +131,31 @@ void taskEvse( void *arg )
   WALLBOX_API::ModbusWallbox modusEvseReg = WALLBOX_API::ModbusWallbox();
   evseReg = &modusEvseReg;
 
-  /*
-  INTERFACES::DataStream_i* uart = BSP::bspUartPlugHandleGet();
-  INTERFACES::UartConfig_i config;
+  uint8_t rxBuffer[200];
 
-  config.BaudRate = 19200;
-  config.halfDuplex = true;
-  config.StopBits = INTERFACES::UartConfig_i::Stopbits::two;
+  auto spiHandle = DRIVERS::EspSpiMaster(HSPI_HOST, rxBuffer, sizeof(rxBuffer));
+  INTERFACES::DataStream_i* handle = &spiHandle;
+  INTERFACES::DataStreamConfig_i config;
 
   // @NOTE response = e.g. 10 mS will fail, since it times out before finish
-  auto modbus = MODBUS::ModbusMaster(uart, &config, 20, 200, 2, mutexModbusData);
-  modbusMasterPlug = &modbus;
-  modbus.deveiceAddresSet(modusPlugReg.modbusAddress);
-*/
+  auto modbus = MODBUS::ModbusMaster(handle, &config, 20, 200, 2, mutexModbusData);
+  modbusMasterEvse = &modbus;
+
   evseInit();
 
+  MODBUS::ModbusRegister* regArray[] =
+      {
+          &evseReg->stateLpp,
+          &evseReg->state61851,
+      };
+
+  uint16_t regArrayLen = IQ_ARRAY_SIZE(regArray);
 
   ESP_LOGI(__FILE__, "Task EVSE init done");
+  vTaskDelay(10000 / portTICK_PERIOD_MS);
   while(1)
   {
+    modbusMasterEvse->readHoldingRegister(regArray, regArrayLen);
 
     printf("Task \"%s\" remaining stack size: %u bytes\n", pcTaskGetName(NULL), uxTaskGetStackHighWaterMark(NULL));
     vTaskDelay(2000 / portTICK_PERIOD_MS);

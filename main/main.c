@@ -24,7 +24,7 @@ void app_main(void)
   xTaskCreate(taskDebug, "debug task", 4000, NULL, 5, NULL);
   xTaskCreate(taskApp, "app", 7000, NULL, 3, NULL);
   xTaskCreate(taskUdpDaemon, "udp", 2000, NULL, 1, NULL);
-  xTaskCreate(taskEvse, "evse", 4000, NULL, 4, NULL);
+  xTaskCreate(taskEvse, "evse", 6000, NULL, 4, NULL);
 
   while (1)
   {
