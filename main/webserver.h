@@ -41,6 +41,7 @@ public:
   void getCbRemove(webserver_getCallback_t cbFunc);
   void putCbAdd(char const* uri, webserver_getCallback_t cbFunc);
   void putCbRemove(webserver_getCallback_t cbFunc);
+  void optionsCbAdd(char const* uri, webserver_getCallback_t cbFunc) ;
 };
 
 

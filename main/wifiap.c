@@ -37,8 +37,8 @@
    the config you want - ie #define EXAMPLE_WIFI_SSID "mywifissid"
 */
 #define EXAMPLE_ESP_WIFI_SSID      "IQ-home"// CONFIG_ESP_WIFI_SSID
-#define EXAMPLE_ESP_WIFI_PASS      "Faseone1" // CONFIG_ESP_WIFI_PASSWORD
-#define EXAMPLE_MAX_STA_CONN       1 // CONFIG_ESP_MAX_STA_CONN
+#define EXAMPLE_ESP_WIFI_PASS      "" // CONFIG_ESP_WIFI_PASSWORD
+#define EXAMPLE_MAX_STA_CONN       2 // CONFIG_ESP_MAX_STA_CONN
 
 static const char *TAG = "wifi softAP";
 static EventGroupHandle_t wifi_event_group = NULL;

@@ -142,6 +142,21 @@ Webserver::~Webserver(void)
   }
 }
 
+void Webserver::optionsCbAdd(char const* uri, webserver_getCallback_t cbFunc) 
+{
+     httpd_uri_t options_uri = {
+        .uri      = uri, // Wildcard URI
+        .method   = HTTP_OPTIONS,
+        .handler  = cbFunc,
+        .user_ctx = NULL
+    };
+
+    ESP_LOGI("WEB", "Registering URI OPTIONS handlers.");
+    if (httpd_register_uri_handler(server, &options_uri) != ESP_OK) {
+        ESP_LOGE("WEB", "Failed to register OPTIONS handler!");
+    } 
+}
+
 void Webserver::getCbAdd(char const* uri, webserver_getCallback_t cbFunc)
 {
   httpd_uri_t getHandler =
